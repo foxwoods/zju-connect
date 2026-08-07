@@ -240,30 +240,85 @@ func (s *Session) performAntiMITMRequestContext(ctx context.Context, data antiMI
 	return nil
 }
 
-func (s *Session) reportEnv() error {
+func (s *Session) endpointStrategy(timing string) (string, error) {
+	log.Println("Perform GET /controller/v1/public/endpointStrategy")
+
+	if s.ticket == "" {
+		return "", fmt.Errorf("login ticket is empty")
+	}
+
+	params := WithSharedParams(url.Values{
+		"ticket": {s.ticket},
+		"timing": {timing},
+	})
+	u := s.baseURL + "/controller/v1/public/endpointStrategy"
+	req, err := http.NewRequest("GET", u+"?"+params.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("x-csrf-token", s.csrfToken)
+	req.Header.Set("x-sdp-traceid", s.randSdpId())
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	log.DebugPrintf("Received endpoint strategy: %s", string(body))
+
+	var re struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Ticket   string `json:"ticket"`
+			Interval int64  `json:"interval"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &re); err != nil {
+		return "", err
+	}
+	if re.Code != 0 {
+		return "", fmt.Errorf("endpointStrategy failed with code %d: %s", re.Code, re.Message)
+	}
+	if re.Data.Ticket == "" {
+		return "", fmt.Errorf("endpointStrategy returned an empty report ticket")
+	}
+
+	return re.Data.Ticket, nil
+}
+
+func (s *Session) reportEnv(reportTicket string) error {
 	log.Println("Perform POST /controller/v1/public/reportEnv")
 
 	u := s.baseURL + "/controller/v1/public/reportEnv"
 
-	if s.ticket == "" {
-		return fmt.Errorf("ticket is empty")
+	if reportTicket == "" {
+		return fmt.Errorf("report ticket is empty")
 	}
 
 	payload := map[string]interface{}{
-		"ticket":   s.ticket,
+		"ticket":   reportTicket,
 		"deviceId": s.deviceID,
 		"env": map[string]interface{}{
-			"endpoint": map[string]interface{}{
-				"device_id": s.deviceID,
-				"device": map[string]interface{}{
-					"type": "browser",
-				},
-			},
+			"endpoint": collectEndpointEnvironment(s.deviceID),
 		},
 	}
-	body, _ := json.Marshal(payload)
-	log.DebugPrintf("Sending report env: %s", string(body))
-	req, _ := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(body))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	log.DebugPrintf("Sending aTrust endpoint environment report for device %s", s.deviceID)
+	req, err := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)

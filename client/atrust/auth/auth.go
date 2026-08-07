@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,15 +20,42 @@ import (
 )
 
 const (
-	UserAgent    = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/2.4.10.50 Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType"
 	maxAttempts  = 5
 	maxAuthSteps = 8
 )
 
+var UserAgent = userAgentForGOOS(runtime.GOOS)
+
 var sharedParams = url.Values{
 	"clientType": {"SDPClient"},
-	"platform":   {"Linux"},
+	"platform":   {platformForGOOS(runtime.GOOS)},
 	"lang":       {"en-US"},
+}
+
+func userAgentForGOOS(goos string) string {
+	switch goos {
+	case "darwin":
+		version := strings.ReplaceAll(commandOutput("sw_vers", "-productVersion"), ".", "_")
+		if version == "" {
+			version = "10_15_7"
+		}
+		return fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X %s) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/%s Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-MacOS SPCClientType", version, atrustClientVersion)
+	case "windows":
+		return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersion + " Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Windows-Plat-x64 SPCClientType"
+	default:
+		return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersion + " Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType"
+	}
+}
+
+func platformForGOOS(goos string) string {
+	switch goos {
+	case "darwin":
+		return "Mac"
+	case "windows":
+		return "Windows"
+	default:
+		return "Linux"
+	}
 }
 
 func WithSharedParams(extra url.Values) url.Values {
@@ -362,7 +390,12 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 		return LoginResult{}, err
 	}
 
-	err = s.reportEnv()
+	reportTicket, err := s.endpointStrategy("pre-login")
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	err = s.reportEnv(reportTicket)
 	if err != nil {
 		return LoginResult{}, err
 	}
