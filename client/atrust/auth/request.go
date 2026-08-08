@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -139,9 +140,18 @@ func (s *Session) authConfigContext(ctx context.Context, mod, needTicket, refres
 	}
 
 	s.csrfToken = responseCSRFToken
+	log.DebugPrintf("Parsed aTrust CSRF token: available=%t length=%d", s.csrfToken != "", len(s.csrfToken))
 	s.pubKey = re.Data.PubKey
 	s.pubKeyExp = re.Data.PubKeyExp
 	s.antiReplayRand = re.Data.AntiReplayRand
+	s.antiMITMSignKey = deriveAntiMITMSignKey(
+		re.Data.AntiMITM.DevicePubKeyMod,
+		re.Data.AntiMITM.DevicePubKeyExp,
+		re.Data.AntiMITM.Challenge,
+	)
+	s.endpointTicket = re.Data.AntiMITM.Ticket
+	log.DebugPrintf("Parsed aTrust anti-MITM request signing material: available=%t", s.antiMITMSignKey != "")
+	log.DebugPrintf("Parsed aTrust pre-login endpoint ticket: available=%t", s.endpointTicket != "")
 
 	isLogin := 0
 	if re.Data.IsLogin != nil {
@@ -243,22 +253,29 @@ func (s *Session) performAntiMITMRequestContext(ctx context.Context, data antiMI
 func (s *Session) endpointStrategy(timing string) (string, error) {
 	log.Println("Perform GET /controller/v1/public/endpointStrategy")
 
-	if s.ticket == "" {
-		return "", fmt.Errorf("login ticket is empty")
+	strategyTicket := s.endpointTicket
+	if strategyTicket == "" {
+		strategyTicket = s.ticket
+	}
+	if strategyTicket == "" {
+		return "", fmt.Errorf("endpoint strategy ticket is empty")
 	}
 
-	params := WithSharedParams(url.Values{
-		"ticket": {s.ticket},
-		"timing": {timing},
-	})
+	query := "timing=" + url.QueryEscape(timing) +
+		"&ticket=" + url.QueryEscape(strategyTicket) +
+		"&platform=" + url.QueryEscape(platformForGOOS(runtime.GOOS)) +
+		"&clientType=SDPClient"
 	u := s.baseURL + "/controller/v1/public/endpointStrategy"
-	req, err := http.NewRequest("GET", u+"?"+params.Encode(), nil)
+	req, err := http.NewRequest("GET", u+"?"+query, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
+	if signature := antiMITMRequestSignature(s.antiMITMSignKey, req.URL.RequestURI(), nil); signature != "" {
+		req.Header.Set("X-Request-Sig", signature)
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -267,6 +284,8 @@ func (s *Session) endpointStrategy(timing string) (string, error) {
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
+	s.interfaceRandom = resp.Header.Get("x-sdp-random")
+	log.DebugPrintf("Received aTrust interface random: available=%t length=%d", s.interfaceRandom != "", len(s.interfaceRandom))
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -302,27 +321,45 @@ func (s *Session) reportEnv(reportTicket string) error {
 	if reportTicket == "" {
 		return fmt.Errorf("report ticket is empty")
 	}
+	log.DebugPrintf("aTrust endpoint strategy ticket matches auth config ticket: %t", reportTicket == s.endpointTicket)
 
-	payload := map[string]interface{}{
-		"ticket":   reportTicket,
-		"deviceId": s.deviceID,
-		"env": map[string]interface{}{
-			"endpoint": collectEndpointEnvironment(s.deviceID),
-		},
+	payload := struct {
+		DeviceID string              `json:"deviceId"`
+		AccessIP string              `json:"accessIp"`
+		Env      endpointEnvironment `json:"env"`
+		Failure  []interface{}       `json:"failure"`
+		Ticket   string              `json:"ticket"`
+		Timing   string              `json:"timing"`
+	}{
+		DeviceID: s.deviceID,
+		AccessIP: "",
+		Env:      collectEndpointEnvironment(s.deviceID),
+		Failure:  []interface{}{},
+		Ticket:   reportTicket,
+		Timing:   "pre-login",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	log.DebugPrintf("Sending aTrust endpoint environment report for device %s", s.deviceID)
-	req, err := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(body))
+	log.DebugPrintf("Sending aTrust pre-login environment report with %d bytes", len(body))
+	query := "platform=" + url.QueryEscape(platformForGOOS(runtime.GOOS)) + "&clientType=SDPClient"
+	req, err := http.NewRequest("POST", u+"?"+query, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Content-Type", "application/json;charset=utf-8")
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-csrf-token", s.csrfToken)
 	req.Header.Set("x-sdp-traceid", s.randSdpId())
+	if signature := antiMITMRequestSignature(s.antiMITMSignKey, req.URL.RequestURI(), body); signature != "" {
+		req.Header.Set("X-Request-Sig", signature)
+		log.DebugPrintf("Added aTrust anti-MITM request signature")
+	}
+	if signature := interfaceRequestSignature(s.interfaceRandom, body); signature != "" {
+		req.Header.Set("x-sdp-signature", signature)
+		log.DebugPrintf("Signed aTrust endpoint environment report")
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -340,7 +377,12 @@ func (s *Session) reportEnv(reportTicket string) error {
 
 	err = json.Unmarshal(body, &re)
 	if err != nil {
-		return err
+		const maxResponsePreview = 512
+		preview := body
+		if len(preview) > maxResponsePreview {
+			preview = preview[:maxResponsePreview]
+		}
+		return fmt.Errorf("reportEnv returned HTTP %s with content type %q from %s: %w; response preview: %q", resp.Status, resp.Header.Get("Content-Type"), resp.Request.URL.Path, err, preview)
 	}
 	log.DebugPrintf("Parsed report env: %+v", re)
 

@@ -45,16 +45,19 @@ func TestCollectEndpointEnvironment(t *testing.T) {
 	if env.DeviceID != "device-id" {
 		t.Fatalf("device ID = %q, want device-id", env.DeviceID)
 	}
-	if env.OS.Family != osFamilyForGOOS(runtime.GOOS) {
-		t.Errorf("OS family = %q, want %q", env.OS.Family, osFamilyForGOOS(runtime.GOOS))
+	if env.OSFamily != osFamilyForGOOS(runtime.GOOS) {
+		t.Errorf("OS family = %q, want %q", env.OSFamily, osFamilyForGOOS(runtime.GOOS))
 	}
-	if env.OS.Arch == "" {
+	if env.OSArch == "" {
 		t.Error("OS architecture must not be empty")
 	}
 	if env.MACAddresses == nil || env.ClientIPs == nil {
 		t.Error("network environment slices must be encoded as arrays, not null")
 	}
-	if env.ATrustClient.Version != atrustClientVersion {
-		t.Errorf("client version = %q, want %q", env.ATrustClient.Version, atrustClientVersion)
+	if env.ATrustClientVersion != atrustClientVersion {
+		t.Errorf("client version = %q, want %q", env.ATrustClientVersion, atrustClientVersion)
+	}
+	if env.UEMSecureEvents == nil {
+		t.Error("UEM secure events must be encoded as an array, not null")
 	}
 }

@@ -127,14 +127,17 @@ type Session struct {
 	baseHost string
 	baseURL  string
 
-	rid            string
-	env            string
-	csrfToken      string
-	pubKey         string
-	pubKeyExp      string
-	antiReplayRand string
-	ticket         string
-	nextService    string
+	rid             string
+	env             string
+	csrfToken       string
+	pubKey          string
+	pubKeyExp       string
+	antiReplayRand  string
+	ticket          string
+	nextService     string
+	endpointTicket  string
+	interfaceRandom string
+	antiMITMSignKey string
 
 	response         map[string]json.RawMessage
 	challengeHandler authchallenge.Handler
@@ -384,20 +387,32 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 		return LoginResult{}, fmt.Errorf("auth type/login domain combination not found: auth type: %s, login domain: %s", method.AuthType(), method.LoginDomain())
 	}
 
+	preLoginEndpointReport := s.endpointTicket != ""
+	if preLoginEndpointReport {
+		reportTicket, err := s.endpointStrategy("pre-login")
+		if err != nil {
+			return LoginResult{}, err
+		}
+		if err := s.reportEnv(reportTicket); err != nil {
+			return LoginResult{}, err
+		}
+	}
+
 	log.Printf("Starting login with auth type: %s, login domain: %s", method.AuthType(), method.LoginDomain())
 	err = method.login(s, *foundAuthInfo)
 	if err != nil {
 		return LoginResult{}, err
 	}
-
-	reportTicket, err := s.endpointStrategy("pre-login")
-	if err != nil {
-		return LoginResult{}, err
-	}
-
-	err = s.reportEnv(reportTicket)
-	if err != nil {
-		return LoginResult{}, err
+	// Older gateways do not provide the pre-login anti-MITM ticket in
+	// authConfig. Preserve their original post-password reporting flow.
+	if !preLoginEndpointReport {
+		reportTicket, err := s.endpointStrategy("pre-login")
+		if err != nil {
+			return LoginResult{}, err
+		}
+		if err := s.reportEnv(reportTicket); err != nil {
+			return LoginResult{}, err
+		}
 	}
 
 	nextService := s.nextService

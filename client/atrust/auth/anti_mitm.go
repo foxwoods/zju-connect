@@ -266,3 +266,28 @@ func antiMITMCertificateDigests(data antiMITMAttackData) [][]byte {
 	}
 	return digests
 }
+
+// deriveAntiMITMSignKey returns the hex-encoded request-signing key derived
+// from authConfig's antiMITMAttackData.
+func deriveAntiMITMSignKey(devicePubKeyMod, devicePubKeyExp, challenge string) string {
+	if devicePubKeyMod == "" || devicePubKeyExp == "" || challenge == "" {
+		return ""
+	}
+	return hex.EncodeToString(sangforSignatureKey(antiMITMAttackData{
+		DevicePubKeyMod: devicePubKeyMod,
+		DevicePubKeyExp: devicePubKeyExp,
+		Challenge:       challenge,
+	}))
+}
+
+func antiMITMRequestSignature(signKey, requestURI string, body []byte) string {
+	key, err := hex.DecodeString(signKey)
+	if err != nil || len(key) == 0 || requestURI == "" {
+		return ""
+	}
+
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(requestURI))
+	_, _ = mac.Write(body)
+	return strings.ToUpper(hex.EncodeToString(mac.Sum(nil)))
+}

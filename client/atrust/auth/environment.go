@@ -15,32 +15,29 @@ import (
 const atrustClientVersion = "2.4.10.50"
 
 type endpointEnvironment struct {
-	DeviceID     string         `json:"device_id"`
-	MACAddresses []string       `json:"mac_addresses"`
-	ClientIPs    []string       `json:"client_ips"`
-	DomainName   string         `json:"domain_name"`
-	OS           endpointOS     `json:"os"`
-	Device       endpointDevice `json:"device"`
-	EDRAgentID   string         `json:"edr_agentid"`
-	ATrustClient endpointClient `json:"atrust_client"`
-	DeviceBrand  string         `json:"device_brand,omitempty"`
-	DeviceModel  string         `json:"device_model,omitempty"`
-}
-
-type endpointOS struct {
-	Hostname string `json:"hostname"`
-	Family   string `json:"family"`
-	Version  string `json:"version"`
-	Arch     string `json:"arch"`
-	SubOS    string `json:"sub_os"`
-}
-
-type endpointDevice struct {
-	Type string `json:"type"`
-}
-
-type endpointClient struct {
-	Version string `json:"version"`
+	OSHostname                     string        `json:"endpoint.os.hostname"`
+	DeviceModel                    string        `json:"endpoint.device_model"`
+	DeviceID                       string        `json:"endpoint.device_id"`
+	ATrustClientVersion            string        `json:"endpoint.atrust_client.version"`
+	MACAddresses                   []string      `json:"endpoint.mac_addresses"`
+	ClientIPs                      []string      `json:"endpoint.client_ips"`
+	DomainName                     string        `json:"endpoint.domain_name"`
+	OSFamily                       string        `json:"endpoint.os.family"`
+	OSVersion                      string        `json:"endpoint.os.version"`
+	OSArch                         string        `json:"endpoint.os.arch"`
+	FirewallEnabled                bool          `json:"endpoint.security.is_firewall_enabled"`
+	DeviceType                     string        `json:"endpoint.device.type"`
+	AntivirusEnabled               bool          `json:"endpoint.security.is_antivirus_enabled"`
+	DomainJoined                   bool          `json:"endpoint.security.is_domain"`
+	AntivirusLatest                bool          `json:"endpoint.antivirus.is_latest"`
+	SandboxType                    string        `json:"endpoint.sandboxType"`
+	EDRAgentID                     string        `json:"endpoint.edr_agentid"`
+	OSSubOS                        string        `json:"endpoint.os.sub_os"`
+	DeviceBrand                    string        `json:"endpoint.device_brand"`
+	UEMClientVersion               string        `json:"endpoint.uem_client.version"`
+	UEMSecureEvents                []interface{} `json:"endpoint.uem_client.secure_events"`
+	SkipCheckSandboxWebResource    bool          `json:"endpoint.uem_client.application.skip_check_sandbox_web_resource"`
+	SkipCheckVirtualNetWebResource bool          `json:"endpoint.uem_client.application.skip_check_virtualnet_web_resource"`
 }
 
 func collectEndpointEnvironment(deviceID string) endpointEnvironment {
@@ -52,26 +49,27 @@ func collectEndpointEnvironment(deviceID string) endpointEnvironment {
 	macAddresses, clientIPs := collectNetworkEnvironment()
 
 	return endpointEnvironment{
-		DeviceID:     deviceID,
-		MACAddresses: macAddresses,
-		ClientIPs:    clientIPs,
-		DomainName:   os.Getenv("USERDOMAIN"),
-		OS: endpointOS{
-			Hostname: hostname,
-			Family:   osFamily,
-			Version:  osVersion,
-			Arch:     runtime.GOARCH,
-			SubOS:    subOS,
-		},
-		// Keep the established browser device type for compatibility with
-		// gateways that already accept zju-connect clients. The surrounding
-		// endpoint variables identify the real host rather than a browser-only
-		// placeholder.
-		Device:       endpointDevice{Type: "browser"},
-		EDRAgentID:   "",
-		ATrustClient: endpointClient{Version: atrustClientVersion},
-		DeviceBrand:  deviceBrand,
-		DeviceModel:  deviceModel,
+		OSHostname:          hostname,
+		DeviceModel:         deviceModel,
+		DeviceID:            deviceID,
+		ATrustClientVersion: atrustClientVersion,
+		MACAddresses:        macAddresses,
+		ClientIPs:           clientIPs,
+		DomainName:          os.Getenv("USERDOMAIN"),
+		OSFamily:            osFamily,
+		OSVersion:           osVersion,
+		OSArch:              runtime.GOARCH,
+		FirewallEnabled:     false,
+		DeviceType:          deviceModel,
+		AntivirusEnabled:    false,
+		DomainJoined:        false,
+		AntivirusLatest:     false,
+		SandboxType:         "WithUem",
+		EDRAgentID:          "",
+		OSSubOS:             subOS,
+		DeviceBrand:         deviceBrand,
+		UEMClientVersion:    atrustClientVersion,
+		UEMSecureEvents:     []interface{}{},
 	}
 }
 
