@@ -266,3 +266,10 @@ func antiMITMCertificateDigests(data antiMITMAttackData) [][]byte {
 	}
 	return digests
 }
+
+func antiMITMRequestSignature(signKey []byte, requestURI string, body []byte) string {
+	if len(signKey) == 0 || requestURI == "" {
+		return ""
+	}
+	return sangforHMAC(signKey, append([]byte(requestURI), body...))
+}
