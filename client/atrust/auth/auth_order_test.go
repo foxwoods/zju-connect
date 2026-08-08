@@ -26,12 +26,17 @@ func (m orderRecordingLogin) login(_ *Session, _ AuthInfo) error {
 }
 
 func TestLoginReportsEndpointEnvironmentAfterCredentialAndBeforeAuthCheck(t *testing.T) {
+	const (
+		devicePubKeyMod = "device-public-key-modulus"
+		devicePubKeyExp = "010001"
+		challenge       = "server-challenge"
+	)
 	var steps []string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/passport/v1/public/authConfig":
 			steps = append(steps, "authConfig")
-			_, _ = w.Write([]byte(`{"code":0,"data":{"isLogin":0,"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}],"antiMITMAttackData":{"ticket":"endpoint-ticket"}}}`))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"isLogin":0,"authServerInfoList":[{"loginDomain":"local","authType":"auth/psw"}],"antiMITMAttackData":{"devicePubKeyMod":"device-public-key-modulus","devicePubKeyExp":"010001","challenge":"server-challenge","ticket":"endpoint-ticket"}}}`))
 		case "/controller/v1/public/endpointStrategy":
 			steps = append(steps, "endpointStrategy")
 			w.Header().Set("x-sdp-random", "interface-random")
@@ -61,6 +66,9 @@ func TestLoginReportsEndpointEnvironmentAfterCredentialAndBeforeAuthCheck(t *tes
 	}
 	if result.Username != "tester" {
 		t.Fatalf("username = %q, want tester", result.Username)
+	}
+	if want := deriveAntiMITMSignKey(devicePubKeyMod, devicePubKeyExp, challenge); result.SignKey != want {
+		t.Fatalf("sign key = %q, want %q", result.SignKey, want)
 	}
 
 	want := []string{"authConfig", "credential", "endpointStrategy", "reportEnv", "authCheck", "onlineInfo"}

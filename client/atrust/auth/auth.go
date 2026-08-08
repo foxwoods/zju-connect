@@ -182,6 +182,7 @@ type LoginOptions struct {
 type LoginResult struct {
 	Username string
 	SID      string
+	SignKey  string
 	Cookies  []Cookie
 }
 
@@ -368,6 +369,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 		return LoginResult{
 			Username: username,
 			SID:      sid,
+			SignKey:  s.antiMITMSignKey,
 			Cookies:  cookies,
 		}, nil
 	}
@@ -423,6 +425,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 	return LoginResult{
 		Username: username,
 		SID:      sid,
+		SignKey:  s.antiMITMSignKey,
 		Cookies:  cookies,
 	}, nil
 }
