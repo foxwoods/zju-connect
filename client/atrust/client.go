@@ -417,7 +417,7 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 			log.Println("Login error:", err)
 			return nil, err
 		}
-		c.Username = loginResult.Username
+		c.applyLoginResult(loginResult)
 
 		resourceData, err = sess.ClientResource()
 		if err != nil {
@@ -480,6 +480,17 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	}
 
 	return authData, nil
+}
+
+func (c *Client) applyLoginResult(result auth.LoginResult) {
+	c.Username = result.Username
+	c.setSessionSID(result.SID, nil)
+	// Modern gateways use the anti-MITM key negotiated by authConfig to
+	// verify the xRequestSig in TCP and L3 tunnel handshakes. Keep the
+	// generated fallback only for older gateways that do not negotiate one.
+	if result.SignKey != "" {
+		c.SignKey = result.SignKey
+	}
 }
 
 func newUnderlayDialer(bindInterface string, autoDetectInterface bool, localDNSServer string) (*underlay.Dialer, error) {

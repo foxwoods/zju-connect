@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -220,6 +221,7 @@ type LoginOptions struct {
 type LoginResult struct {
 	Username string
 	SID      string
+	SignKey  string
 	Cookies  []Cookie
 }
 
@@ -407,6 +409,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 		return LoginResult{
 			Username: username,
 			SID:      sid,
+			SignKey:  hex.EncodeToString(s.signKey),
 			Cookies:  cookies,
 		}, nil
 	}
@@ -462,6 +465,7 @@ func (s *Session) Login(method LoginMethod, opts LoginOptions) (LoginResult, err
 	return LoginResult{
 		Username: username,
 		SID:      sid,
+		SignKey:  hex.EncodeToString(s.signKey),
 		Cookies:  cookies,
 	}, nil
 }
