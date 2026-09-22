@@ -167,6 +167,9 @@ func parseTCPTunnelAuthResponse(data string) error {
 		return fmt.Errorf("failed to parse tcp tunnel auth response: %w", err)
 	}
 	if response.Code != 0 {
+		if response.Code == 10000004 || response.Code == 75500002 {
+			log.Fatalf("tcp tunnel: aTrust session is invalid (code %d): %s", response.Code, response.Message)
+		}
 		return fmt.Errorf("tcp tunnel authentication failed (code %d): %s", response.Code, response.Message)
 	}
 	return nil

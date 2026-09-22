@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,17 +16,20 @@ import (
 	"github.com/mythologyli/zju-connect/client/atrust/auth"
 )
 
-func TestSessionRefreshPublishesAndPersistsThenStopsOnInvalid(t *testing.T) {
+func TestSessionRefreshPublishesAndPersists(t *testing.T) {
 	c := NewClient(ClientOptions{Session: SessionOptions{SID: "old"}})
 	defer c.Close()
 	persisted := make(chan []byte, 1)
+	retried := make(chan struct{})
 	calls := 0
 	c.startSessionRefresh(func(ctx context.Context) (auth.LoginResult, error) {
 		calls++
 		if calls == 1 {
 			return auth.LoginResult{SID: "new", Cookies: []auth.Cookie{{Name: "sid", Value: "new"}}}, nil
 		}
-		return auth.LoginResult{}, auth.ErrSessionInvalid
+		close(retried)
+		<-ctx.Done()
+		return auth.LoginResult{}, ctx.Err()
 	}, auth.ClientAuthData{DeviceID: "device", ServerVersionInfo: json.RawMessage(`{"code":0}`)}, func(data []byte) error {
 		if sid, err := c.sessionSID(); sid != "new" || err != nil {
 			t.Errorf("published SID = %q, %v", sid, err)
@@ -31,9 +38,11 @@ func TestSessionRefreshPublishesAndPersistsThenStopsOnInvalid(t *testing.T) {
 		return nil
 	}, time.Millisecond)
 	select {
+	case <-retried:
 	case <-c.refreshDone:
+		t.Fatal("refresh stopped unexpectedly")
 	case <-time.After(time.Second):
-		t.Fatal("invalid session did not stop refresh")
+		t.Fatal("next refresh did not start")
 	}
 	if calls != 2 {
 		t.Fatalf("refresh calls = %d", calls)
@@ -50,11 +59,11 @@ func TestSessionRefreshPublishesAndPersistsThenStopsOnInvalid(t *testing.T) {
 	if saved.DeviceID != "device" || len(saved.ServerVersionInfo) == 0 || saved.Cookies[0].Value != "new" {
 		t.Fatalf("saved = %+v", saved)
 	}
-	if _, err := c.DialTCP(context.Background(), &net.TCPAddr{}); !errors.Is(err, auth.ErrSessionInvalid) {
-		t.Fatalf("TCP error = %v", err)
+	if sid, err := c.sessionSID(); sid != "new" || err != nil {
+		t.Fatalf("retained SID = %q, %v", sid, err)
 	}
-	if _, err := (clientInfo{sidProvider: c.sessionSID}).currentSID(); !errors.Is(err, auth.ErrSessionInvalid) {
-		t.Fatalf("L3 error = %v", err)
+	if sid, err := (clientInfo{sidProvider: c.sessionSID}).currentSID(); sid != "new" || err != nil {
+		t.Fatalf("L3 SID = %q, %v", sid, err)
 	}
 }
 
@@ -137,4 +146,47 @@ func TestConcurrentSessionSIDReaders(t *testing.T) {
 		c.setSessionSID("new", nil)
 	}
 	wg.Wait()
+}
+
+func TestSessionInvalidExits(t *testing.T) {
+	if mode := os.Getenv("ZJU_CONNECT_TEST_INVALID_SESSION"); mode != "" {
+		parts := strings.Split(mode, ":")
+		payload := fmt.Sprintf(`{"code":%s,"message":"session rejected"}`, parts[1])
+		switch parts[0] {
+		case "refresh":
+			c := NewClient(ClientOptions{Session: SessionOptions{SID: "old"}})
+			c.startSessionRefresh(func(context.Context) (auth.LoginResult, error) {
+				return auth.LoginResult{}, fmt.Errorf("refresh rejected: %w", auth.ErrSessionInvalid)
+			}, auth.ClientAuthData{}, nil, time.Millisecond)
+			<-c.refreshDone
+		case "tcp":
+			_ = parseTCPTunnelAuthResponse(payload)
+		case "ip":
+			_ = parseIPAuthResponse([]byte(payload))
+		case "l3":
+			// Reject the session before retrying or looking up conntrack.
+			(&l3TunnelConn{}).handleAuthResp(authImmediateRetryStatus, []byte(payload))
+		}
+		return
+	}
+	for _, mode := range []string{"refresh:0", "tcp:10000004", "tcp:75500002", "ip:10000004", "ip:75500002", "l3:10000004", "l3:75500002"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSessionInvalidExits$")
+			cmd.Env = append(os.Environ(), "ZJU_CONNECT_TEST_INVALID_SESSION="+mode)
+			output, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || ctx.Err() != nil {
+				t.Fatalf("expected exit code 1: %v, output: %s", err, output)
+			}
+			want := "aTrust session is invalid (code " + strings.Split(mode, ":")[1] + "): session rejected"
+			if mode == "refresh:0" {
+				want = "aTrust session maintenance failed: refresh rejected: " + auth.ErrSessionInvalid.Error()
+			}
+			if !strings.Contains(string(output), want) {
+				t.Fatalf("missing diagnostic %q: %s", want, output)
+			}
+		})
+	}
 }

@@ -526,6 +526,9 @@ func (c *l3TunnelConn) handleAuthResp(status byte, payload []byte) {
 		c.markAuthErrorFromPayload(payload, err)
 		return
 	}
+	if resp.Code == 10000004 || resp.Code == 75500002 {
+		log.Fatalf("l3-tunnel resource auth: aTrust session is invalid (code %d): %s", resp.Code, resp.Message)
+	}
 	ct := c.conntrackMgr.getByID(resp.Data.ConntrackHash)
 	if ct == nil {
 		ct = c.conntrackMgr.getByAuthResponseIP(resp.Data.IP)
@@ -927,17 +930,20 @@ func (c *l3TunnelConn) authTunnel() error {
 	}
 	log.DebugPrintf("l3-tunnel recv tunnel auth payload len=%d status=%d", len(payload), status)
 	log.DebugDumpHex(payload)
-	if status != 0 {
-		return fmt.Errorf("l3-tunnel tunnel auth status %d", status)
-	}
 	if len(payload) > 0 {
 		var resp authResponseSID
 		if err := json.Unmarshal(payload, &resp); err != nil {
 			return err
 		}
+		if resp.Code == 10000004 || resp.Code == 75500002 {
+			log.Fatalf("l3-tunnel: aTrust session is invalid (code %d): %s", resp.Code, resp.Message)
+		}
 		if resp.Code != 0 {
 			return fmt.Errorf("l3-tunnel tunnel auth failed: %d %s", resp.Code, resp.Message)
 		}
+	}
+	if status != 0 {
+		return fmt.Errorf("l3-tunnel tunnel auth status %d", status)
 	}
 
 	vipHeader := make([]byte, 4)
