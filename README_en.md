@@ -81,6 +81,10 @@
 
 [Link](docs/docker_en.md)
 
+#### aTrust Protocol
+
+[Link (Chinese)](docs/atrust_protocol.md)
+
 ### Warning
 
 1. When using other proxy tools with TUN mode enabled and zju-connect as a downstream proxy, please be sure to provide the correct network diversion rules, refer to [this issue](https://github.com/Mythologyli/zju-connect/issues/57)

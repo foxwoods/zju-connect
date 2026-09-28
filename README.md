@@ -86,6 +86,10 @@
 
 [链接](docs/docker.md)
 
+#### aTrust 协议说明
+
+[链接](docs/atrust_protocol.md)
+
 ### 警告
 
 1. 当使用其他开启了 TUN 模式的代理工具，同时配合 zju-connect 作为下游代理时，请注意务必提供正确的分流规则，参考[此 issue](https://github.com/Mythologyli/zju-connect/issues/57)
