@@ -783,7 +783,10 @@ func (s *Session) ClientResource() ([]byte, error) {
 		},
 	}
 	bdy, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", u+"?"+WithSharedParams(nil).Encode(), bytes.NewReader(bdy))
+	// The official client sends controller requests without lang.
+	params := WithSharedParams(nil)
+	params.Del("lang")
+	req, _ := http.NewRequest("POST", u+"?"+params.Encode(), bytes.NewReader(bdy))
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Content-Type", "application/json;charset=utf-8")
 	req.Header.Set("x-csrf-token", s.csrfToken)

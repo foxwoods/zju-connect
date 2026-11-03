@@ -41,11 +41,11 @@ func userAgentForGOOS(goos string) string {
 		if version == "" {
 			version = "10_15_7"
 		}
-		return fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X %s) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/%s Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-MacOS SPCClientType", version, atrustClientVersion)
+		return fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X %s) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/%s Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-MacOS SPCClientType", version, atrustClientVersionForGOOS(goos))
 	case "windows":
-		return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersion + " Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Windows-Plat-x64 SPCClientType"
+		return "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersionForGOOS(goos) + " Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-Windows-Plat SPCClientType"
 	default:
-		return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersion + " Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType"
+		return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/" + atrustClientVersionForGOOS(goos) + " Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType"
 	}
 }
 

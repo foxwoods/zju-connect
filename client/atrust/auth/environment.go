@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -12,7 +13,18 @@ import (
 	"github.com/mythologyli/zju-connect/log"
 )
 
-const atrustClientVersion = "2.4.10.50"
+// The Windows value matches the official 200.4.10.25002 client; other
+// platforms keep the version zju-connect has always reported.
+var atrustClientVersion = atrustClientVersionForGOOS(runtime.GOOS)
+
+var windowsVersionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
+
+func atrustClientVersionForGOOS(goos string) string {
+	if goos == "windows" {
+		return "200.4.10.25002"
+	}
+	return "2.4.10.50"
+}
 
 type endpointEnvironment struct {
 	OSHostname                     string        `json:"endpoint.os.hostname"`
@@ -68,7 +80,7 @@ func collectEndpointEnvironment(deviceID string) endpointEnvironment {
 		EDRAgentID:          "",
 		OSSubOS:             subOS,
 		DeviceBrand:         deviceBrand,
-		UEMClientVersion:    atrustClientVersion,
+		UEMClientVersion:    "",
 		UEMSecureEvents:     []interface{}{},
 	}
 }
@@ -89,7 +101,7 @@ func collectOSDetails(goos, fallbackSubOS string) (string, string) {
 	case "darwin":
 		return commandOutput("sw_vers", "-productVersion"), "macOS"
 	case "windows":
-		return commandOutput("cmd", "/c", "ver"), "Windows"
+		return windowsVersion(commandOutput("cmd", "/c", "ver")), "Windows"
 	case "linux":
 		id, version := readOSRelease()
 		if id == "" {
@@ -99,6 +111,12 @@ func collectOSDetails(goos, fallbackSubOS string) (string, string) {
 	default:
 		return "", fallbackSubOS
 	}
+}
+
+// windowsVersion extracts "10.0.22631" from `ver` output such as
+// "Microsoft Windows [Version 10.0.22631.4317]", as the official client reports.
+func windowsVersion(ver string) string {
+	return windowsVersionPattern.FindString(ver)
 }
 
 func collectDeviceIdentity(goos string) (string, string) {
