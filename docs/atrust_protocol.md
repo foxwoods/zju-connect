@@ -46,7 +46,9 @@ sequenceDiagram
     else 需要登录
         C->>H: 主认证（psw / smsCheckCode / cas / httpsOauth2）
         H-->>C: ticket
-        C->>H: POST /controller/v1/public/reportEnv (ticket)
+        C->>H: GET /controller/v1/public/endpointStrategy (timing=pre-login)
+        H-->>C: 上报 ticket
+        C->>H: POST /controller/v1/public/reportEnv (上报 ticket)
         loop 二次认证链（最多 8 步）
             C->>H: authCheck / sms / customSms
         end
@@ -110,19 +112,27 @@ sequenceDiagram
 - 除 CAS/OAuth2 回调外，所有请求附加公共查询参数：
 
   ```
-  clientType=SDPClient&platform=Linux&lang=en-US
+  clientType=SDPClient&platform=<platform>&lang=en-US
   ```
+
+  `platform` 按 `runtime.GOOS` 取 `Windows` / `Mac` / `Linux`（官方 Windows 客户端为 `Windows`）。`/controller/*` 请求（`endpointStrategy`、`reportEnv`、`clientResource`）不带 `lang`，与官方客户端一致。
 
 - 请求头：
 
   | Header | 值 | 使用范围 |
   | --- | --- | --- |
-  | `User-Agent` | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/2.4.10.50 Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType` | 全部 |
+  | `User-Agent` | 按平台选择，见下表 | 全部 |
   | `x-csrf-token` | 最近一次 `authConfig` 得到的 `csrfToken`（首个请求为空） | 除 `checkCode` 外全部 |
   | `x-sdp-traceid` | 8 位随机 hex | 除 `checkCode` 外全部 |
   | `x-sdp-rid` | `base64(host[:port])` | 仅 `authConfig` |
   | `x-sdp-env` | `base64({"deviceId":"<DeviceID>"})` | `auth/psw`、`public/sendSms`、`auth/smsCheckCode` |
-  | `Content-Type` | `application/json;charset=utf-8` | JSON 请求体 |
+  | `Content-Type` | `application/json;charset=utf-8`（`reportEnv` 为 `application/json`） | JSON 请求体 |
+
+  | 平台 | `User-Agent` |
+  | --- | --- |
+  | Windows | `Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/200.4.10.25002 Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-Windows-Plat SPCClientType`（与官方 200.4.10.25002 客户端一致） |
+  | macOS | `Mozilla/5.0 (Macintosh; Intel Mac OS X <版本>) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/2.4.10.50 Chrome/87.0.4280.141 Electron/11.5.0 Safari/537.36 aTrustTray-MacOS SPCClientType` |
+  | Linux | `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) aTrustTray/2.4.10.50 Chrome/83.0.4103.94 Electron/9.0.2 Safari/537.36 aTrustTray-Linux-Plat-Ubuntu-x64 SPCClientType` |
 
 - 响应体统一为：
 
@@ -167,7 +177,7 @@ sequenceDiagram
 
 ### 3.3 主认证
 
-主认证的产物是 `ticket`，供 [`reportEnv`](#34-post-controllerv1publicreportenv) 使用。
+主认证的产物是 `ticket`，供终端环境上报（3.4 节）使用。
 
 #### 3.3.1 密码：`POST /passport/v1/auth/psw`
 
@@ -263,24 +273,62 @@ https://<host>/passport/v1/auth/httpsOauth2?sfDomain=<loginDomain>&code=<OAuth2 
 
 `-auth-type ""` 时不执行主认证，仅依赖 client data file 中的 Cookie；`authConfig` 返回 `isLogin != 1` 时报错。
 
-### 3.4 `POST /controller/v1/public/reportEnv`
+### 3.4 终端环境上报：`endpointStrategy` + `reportEnv`
 
-主认证后必须调用，`ticket` 为空时客户端直接报错。
+实现：`Session.endpointStrategy` / `Session.reportEnv`（`client/atrust/auth/request.go`），数据采集在 `environment.go`。
+
+**时机。** 官方称为 `reportEnvBeforeLogin`，但实际发生在用户提交凭据之后、登录完成之前：Windows 官方客户端日志中，本地 `/v1/auth/psw` 在 11:08:26.714 进入 `PswAuthImpl::execute`，pre-login 上报在 27.5–27.8 s 完成，随后才是 `sessionIdExchange` / `onlineInfo`。zju-connect 在主认证之后、`authCheck` 之前上报；更早上报会改变网关会话，使密码认证的防重放材料失效。
+
+**1. `GET /controller/v1/public/endpointStrategy`**
+
+```
+?timing=pre-login&ticket=<ticket>&platform=<platform>&clientType=SDPClient
+```
+
+`ticket` 优先取 `authConfig` 中 `antiMITMAttackData.ticket`，为空时退回主认证的 `ticket`。带 `X-Request-Sig`（第 9 节，签名内容为 RequestURI）。响应 `data.ticket` 是上报用的 ticket；响应头 `x-sdp-random` 用于下一步的 `x-sdp-signature`。
+
+**2. `POST /controller/v1/public/reportEnv?platform=<platform>&clientType=SDPClient`**
 
 ```json
 {
-  "ticket": "<ticket>",
   "deviceId": "<DeviceID>",
+  "accessIp": "",
   "env": {
-    "endpoint": {
-      "device_id": "<DeviceID>",
-      "device": {"type": "browser"}
-    }
-  }
+    "endpoint.device_id": "<DeviceID>",
+    "endpoint.os.family": "Windows",
+    "endpoint.os.version": "10.0.22631",
+    "endpoint.os.sub_os": "Windows",
+    "endpoint.atrust_client.version": "200.4.10.25002",
+    "endpoint.uem_client.version": "",
+    "endpoint.uem_client.secure_events": [],
+    "...": "..."
+  },
+  "failure": [],
+  "ticket": "<endpointStrategy 返回的 ticket>",
+  "timing": "pre-login"
 }
 ```
 
-响应 `code != 0` 为失败。
+`env` 使用扁平的 `endpoint.*` 键（完整字段见 `endpointEnvironment`）。请求头额外带 `X-Request-Sig`（RequestURI + body）和 `x-sdp-signature`（由 `x-sdp-random` 派生）。响应 `code != 0` 为失败。
+
+| 字段 | zju-connect 取值 | 官方 Windows 客户端（日志可见部分） |
+| --- | --- | --- |
+| `platform`（查询参数） | `Windows` / `Mac` / `Linux` | `Windows` |
+| `endpoint.os.family` | `Windows` / `macOS` / `Linux` | 请求体未落日志；设备画像中为 windows |
+| `endpoint.os.version` | Windows：`cmd /c ver` 中的 `主.次.构建`（如 `10.0.22631`） | `10.0.22631` |
+| `endpoint.os.sub_os` | Windows `Windows`，macOS `macOS`，Linux 取 `/etc/os-release` 的 `ID` | 未知 |
+| `endpoint.atrust_client.version` | Windows `200.4.10.25002`，其他平台 `2.4.10.50` | `200.4.10.25002` |
+| `endpoint.uem_client.version` | 空 | 未安装 UEM（`uemNotInstalled`） |
+| `endpoint.edr_agentid` | 空 | 读注册表失败，为空 |
+| `endpoint.mac_addresses` | 本机网卡 MAC；配置了 `mac_addresses` 时用配置值 | — |
+
+**官方客户端登录后的上报（zju-connect 未实现）。** 登录完成后官方客户端还会：
+
+1. `GET /controller/v1/public/endpointStrategy`（不带 `timing` / `ticket`），再 `POST /controller/v1/user/reportEnv`；
+2. 之后每 60 s 检查一次，内容与上次相同则跳过（`the report conent is same as last`）；
+3. 收到 `ACLPolicyChanged` 事件后延迟数秒重新上报。
+
+网关下发的检查项包括 `edr_agent_id`、`system`、`inner_category`、`uem_secure_event`。zju-connect 目前只做 pre-login 上报。
 
 ### 3.5 二次认证链
 
@@ -488,7 +536,8 @@ IPv6 形式一律跳过。每条 IP / 域名资源都记录 `(PortMin, PortMax, 
 | POST | `/passport/v1/auth/smsCheckCode` | 短信登录：校验验证码 |
 | GET | `/passport/v1/auth/cas` | CAS 回调 |
 | GET | `/passport/v1/auth/httpsOauth2` | OAuth2 回调 |
-| POST | `/controller/v1/public/reportEnv` | 上报终端环境 |
+| GET | `/controller/v1/public/endpointStrategy` | 取终端检查策略与上报 ticket |
+| POST | `/controller/v1/public/reportEnv` | 登录前上报终端环境 |
 | GET | `/passport/v1/auth/authCheck` | 查询下一认证步骤 |
 | GET | `/passport/v1/public/phoneNumber` | 查询绑定手机号（掩码） |
 | GET / POST | `/passport/v1/auth/sms` | 二次认证短信：`action=sendsms` / `action=checkcode` |
@@ -498,6 +547,8 @@ IPv6 形式一律跳过。每条 IP / 域名资源都记录 `(PortMin, PortMax, 
 | GET | `/passport/v1/security/queryDevice` | 查询设备信任状态 |
 | POST | `/passport/v1/security/trustDevice` | 信任设备 |
 | POST | `/passport/v1/security/untrustDevice` | 取消信任设备 |
+
+官方 Windows 客户端还会调用以下接口，zju-connect 未使用：`/controller/v1/user/reportEnv`（登录后定时上报）、`/passport/v1/public/sessionIdExchange`、`/passport/v1/security/passportTokenExchange`、`/passport/v1/public/ticketExchange`、`/passport/v1/public/spaConfig`、`/controller/v1/public/events`（长轮询事件）。
 
 ---
 
