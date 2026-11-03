@@ -74,3 +74,38 @@ func TestCollectEndpointEnvironment(t *testing.T) {
 		t.Error("UEM secure events must be encoded as an array, not null")
 	}
 }
+
+func TestEmulateWindows(t *testing.T) {
+	SetEmulateWindows(true)
+	defer SetEmulateWindows(false)
+
+	if got := effectivePlatform(); got != "Windows" {
+		t.Errorf("effectivePlatform() = %q, want Windows", got)
+	}
+	if !strings.Contains(UserAgent, "aTrustTray-Windows") {
+		t.Errorf("UserAgent = %q, want Windows marker", UserAgent)
+	}
+
+	env := collectEndpointEnvironment("device-id")
+	if env.OSFamily != "Windows" {
+		t.Errorf("OS family = %q, want Windows", env.OSFamily)
+	}
+	if env.OSSubOS != "Windows" {
+		t.Errorf("OS sub_os = %q, want Windows", env.OSSubOS)
+	}
+	if env.OSVersion != "10.0.22631" {
+		t.Errorf("OS version = %q, want 10.0.22631", env.OSVersion)
+	}
+	if env.OSArch != "x64" {
+		t.Errorf("OS arch = %q, want x64", env.OSArch)
+	}
+	if env.ATrustClientVersion != "200.4.10.25002" {
+		t.Errorf("client version = %q, want 200.4.10.25002", env.ATrustClientVersion)
+	}
+	if env.DeviceBrand != "HP" {
+		t.Errorf("device brand = %q, want HP", env.DeviceBrand)
+	}
+	if env.DeviceModel != "HP EliteBook 840 14 inch G9 Notebook PC" {
+		t.Errorf("device model = %q, want HP EliteBook 840 14 inch G9 Notebook PC", env.DeviceModel)
+	}
+}

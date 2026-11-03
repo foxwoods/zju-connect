@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mythologyli/zju-connect/client/atrust/auth"
+
 	"github.com/mythologyli/zju-connect/internal/zctcpip"
 	"github.com/mythologyli/zju-connect/log"
 )
@@ -683,6 +685,11 @@ func defaultEnv(info clientInfo) *trustEnv {
 	platform := strings.Title(runtime.GOOS)
 	if platform == "Darwin" {
 		platform = "macOS"
+	}
+	if auth.EmulateWindows {
+		platform = "Windows"
+		procPath = `C:\Program Files (x86)\Sangfor\aTrust\aTrustTray\aTrustTray.exe`
+		procName = "aTrustTray.exe"
 	}
 
 	var env trustEnv

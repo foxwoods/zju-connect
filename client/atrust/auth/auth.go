@@ -26,12 +26,32 @@ const (
 	maxAuthSteps = 8
 )
 
-var UserAgent = userAgentForGOOS(runtime.GOOS)
+var (
+	EmulateWindows = false
+	UserAgent      = userAgentForGOOS(runtime.GOOS)
+	sharedParams   = url.Values{
+		"clientType": {"SDPClient"},
+		"platform":   {platformForGOOS(runtime.GOOS)},
+		"lang":       {"en-US"},
+	}
+)
 
-var sharedParams = url.Values{
-	"clientType": {"SDPClient"},
-	"platform":   {platformForGOOS(runtime.GOOS)},
-	"lang":       {"en-US"},
+func SetEmulateWindows(enable bool) {
+	EmulateWindows = enable
+	effectiveGOOS := runtime.GOOS
+	if enable {
+		effectiveGOOS = "windows"
+	}
+	UserAgent = userAgentForGOOS(effectiveGOOS)
+	atrustClientVersion = atrustClientVersionForGOOS(effectiveGOOS)
+	sharedParams["platform"] = []string{platformForGOOS(effectiveGOOS)}
+}
+
+func effectivePlatform() string {
+	if EmulateWindows {
+		return "Windows"
+	}
+	return platformForGOOS(runtime.GOOS)
 }
 
 func userAgentForGOOS(goos string) string {

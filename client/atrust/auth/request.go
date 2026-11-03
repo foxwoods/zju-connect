@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -262,7 +261,7 @@ func (s *Session) endpointStrategy(timing string) (string, error) {
 
 	query := "timing=" + url.QueryEscape(timing) +
 		"&ticket=" + url.QueryEscape(strategyTicket) +
-		"&platform=" + url.QueryEscape(platformForGOOS(runtime.GOOS)) +
+		"&platform=" + url.QueryEscape(effectivePlatform()) +
 		"&clientType=SDPClient"
 	u := s.baseURL + "/controller/v1/public/endpointStrategy"
 	req, err := http.NewRequest("GET", u+"?"+query, nil)
@@ -348,7 +347,7 @@ func (s *Session) reportEnv(reportTicket string) error {
 		return err
 	}
 	log.DebugPrintf("Sending aTrust pre-login environment report with %d bytes", len(body))
-	query := "platform=" + url.QueryEscape(platformForGOOS(runtime.GOOS)) + "&clientType=SDPClient"
+	query := "platform=" + url.QueryEscape(effectivePlatform()) + "&clientType=SDPClient"
 	req, err := http.NewRequest("POST", u+"?"+query, bytes.NewReader(body))
 	if err != nil {
 		return err

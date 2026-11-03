@@ -61,6 +61,7 @@ type Config struct {
 	ResourceFile            string   `koanf:"resource_file"`
 	UpdateBestNodesInterval int      `koanf:"update_best_nodes_interval"`
 	SessionRefreshInterval  int      `koanf:"session_refresh_interval"`
+	FakeWindows             bool     `koanf:"fake_windows"`
 }
 
 type SinglePortForwarding struct {

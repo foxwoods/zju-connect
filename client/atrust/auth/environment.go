@@ -54,11 +54,32 @@ type endpointEnvironment struct {
 
 func collectEndpointEnvironment(deviceID string) endpointEnvironment {
 	hostname, _ := os.Hostname()
-	osFamily := osFamilyForGOOS(runtime.GOOS)
-	osVersion, subOS := collectOSDetails(runtime.GOOS, osFamily)
-	deviceBrand, deviceModel := collectDeviceIdentity(runtime.GOOS)
+	effectiveGOOS := runtime.GOOS
+	if EmulateWindows {
+		effectiveGOOS = "windows"
+	}
+	osFamily := osFamilyForGOOS(effectiveGOOS)
+	osVersion, subOS := collectOSDetails(effectiveGOOS, osFamily)
+	deviceBrand, deviceModel := collectDeviceIdentity(effectiveGOOS)
 
 	macAddresses, clientIPs := collectNetworkEnvironment()
+
+	arch := runtime.GOARCH
+	if EmulateWindows {
+		arch = "x64"
+		if osVersion == "" {
+			osVersion = "10.0.22631"
+		}
+		if subOS == "" {
+			subOS = "Windows"
+		}
+		if deviceBrand == "" {
+			deviceBrand = "HP"
+		}
+		if deviceModel == "" {
+			deviceModel = "HP EliteBook 840 14 inch G9 Notebook PC"
+		}
+	}
 
 	return endpointEnvironment{
 		OSHostname:          hostname,
@@ -70,7 +91,7 @@ func collectEndpointEnvironment(deviceID string) endpointEnvironment {
 		DomainName:          os.Getenv("USERDOMAIN"),
 		OSFamily:            osFamily,
 		OSVersion:           osVersion,
-		OSArch:              runtime.GOARCH,
+		OSArch:              arch,
 		FirewallEnabled:     false,
 		DeviceType:          deviceModel,
 		AntivirusEnabled:    false,

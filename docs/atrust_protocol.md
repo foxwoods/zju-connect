@@ -322,6 +322,8 @@ https://<host>/passport/v1/auth/httpsOauth2?sfDomain=<loginDomain>&code=<OAuth2 
 | `endpoint.edr_agentid` | 空 | 读注册表失败，为空 |
 | `endpoint.mac_addresses` | 本机网卡 MAC；配置了 `mac_addresses` 时用配置值 | — |
 
+非 Windows 平台如需绕过网关的 Windows 客户端准入控制策略（ACL `PolicyDisobeyed`），可通过 `--fake-windows` 启用 Windows 环境伪装（模拟 Windows 10.0.22631、User-Agent、客户端版本 200.4.10.25002 与设备画像）。
+
 **官方客户端登录后的上报（zju-connect 未实现）。** 登录完成后官方客户端还会：
 
 1. `GET /controller/v1/public/endpointStrategy`（不带 `timing` / `ticket`），再 `POST /controller/v1/user/reportEnv`；

@@ -129,6 +129,9 @@ func main() {
 			conf.TCPTunnelMode = true
 		}
 	case "atrust":
+		if conf.FakeWindows {
+			auth.SetEmulateWindows(true)
+		}
 		var err error
 		var resourceData []byte
 

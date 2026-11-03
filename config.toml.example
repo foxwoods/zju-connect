@@ -71,3 +71,4 @@ sid = ""
 device_id = ""
 sign_key = ""
 resource_file = ""
+fake_windows = false # Optional: emulate Windows aTrust client environment on non-Windows platforms

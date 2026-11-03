@@ -208,6 +208,7 @@ The old `disable_zju_dns` and `zju_dns_server` names, including their command-li
 + `phone`: Phone number used for SMS verification code login.
 + `update-best-nodes-interval`: Interval for updating the optimal line automatically, in seconds, default is `300`. Set to `0` to disable automatic optimal line selection.
 + `session-refresh-interval`: aTrust SID refresh interval in seconds, default `1800`. Set to `0` to disable periodic refresh. The TOML key is `session_refresh_interval`; the environment variable is `ZJU_CONNECT_SESSION_REFRESH_INTERVAL`.
++ `fake-windows`: Emulate official Windows aTrust client environment (OS version, User-Agent, client version, and device profile) on non-Windows platforms, for gateways enforcing Windows-only ACL policies.
 + `auth-info`: Only get aTrust authentication information without logging in, generally no need to add this argument. Can be used to check supported authentication methods.
 + `trust-device`: Trust the current device (requires logged-in `-client-data-file`), does not start the tunnel.
 + `untrust-device`: Untrust the current device (requires logged-in `-client-data-file`), does not start the tunnel.

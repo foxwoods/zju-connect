@@ -136,6 +136,7 @@ func newFlagSet(defaults configs.Config) *pflag.FlagSet {
 	flags.String("resource-file", defaults.ResourceFile, "aTrust Resource File")
 	flags.Int("update-best-nodes-interval", defaults.UpdateBestNodesInterval, "Interval to update best nodes in seconds")
 	flags.Int("session-refresh-interval", defaults.SessionRefreshInterval, "aTrust session refresh interval in seconds (0 disables)")
+	flags.Bool("fake-windows", defaults.FakeWindows, "Emulate official Windows aTrust client environment")
 
 	for _, spec := range collectionSpecs {
 		flags.String(spec.FlagName, "", spec.Help)

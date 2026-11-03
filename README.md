@@ -216,6 +216,8 @@
 
 + `phone`: 短信验证码登录时使用的手机号
 
++ `fake-windows`: 在非 Windows 平台模拟官方 Windows aTrust 客户端环境（操作系统版本、User-Agent、客户端版本与设备画像），适用于服务端 ACL 策略要求 Windows 客户端的网关
+
 + `update-best-nodes-interval`: 自动选择最优线路的更新间隔，单位为秒，默认为 `300` 秒。设置为 `0` 则禁用自动选择最优线路
 
 + `session-refresh-interval`: aTrust SID 刷新间隔，单位为秒，默认为 `1800`。设置为 `0` 则禁用定时刷新。
