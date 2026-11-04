@@ -2,6 +2,7 @@ package tun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -28,9 +29,12 @@ type Endpoint struct {
 	writeLock sync.Mutex
 	configMu  sync.RWMutex
 	ip        net.IP
+	command   func(string, ...string) ([]byte, error)
 
 	ipSetBuilder netaddr.IPSetBuilder
 	ipSet        *netaddr.IPSet
+	// Exact routes successfully installed by this stack (not merged IPSet prefixes).
+	routes []string
 
 	tcpDialer *net.Dialer
 	udpDialer *net.Dialer
@@ -53,16 +57,37 @@ func (ep *Endpoint) Read(buf []byte) (int, error) {
 }
 
 func (s *Stack) AddRoute(target string) error {
-	command := exec.Command("route", "-n", "add", "-net", target, "-interface", s.endpoint.ifceName)
-	err := command.Run()
+	prefix, err := netaddr.ParseIPPrefix(target)
 	if err != nil {
 		return err
 	}
+	ep := s.endpoint
+	ep.configMu.Lock()
+	defer ep.configMu.Unlock()
+	if err := ep.setRouteAddress("add", target, ep.ip); err != nil {
+		return err
+	}
 
-	s.endpoint.ipSetBuilder.AddPrefix(netaddr.MustParseIPPrefix(target))
-	s.endpoint.ipSet, _ = s.endpoint.ipSetBuilder.IPSet()
+	ep.routes = append(ep.routes, target)
+	ep.ipSetBuilder.AddPrefix(prefix)
+	ep.ipSet, _ = ep.ipSetBuilder.IPSet()
 
 	return nil
+}
+
+func (ep *Endpoint) setRouteAddress(action, target string, ip net.IP) error {
+	output, err := ep.runCommand("route", "-n", action, "-net", target, "-interface", ep.ifceName, "-ifa", ip.String())
+	if err != nil {
+		return fmt.Errorf("%s TUN route %s via %s: %w: %s", action, target, ip, err, output)
+	}
+	return nil
+}
+
+func (ep *Endpoint) runCommand(name string, args ...string) ([]byte, error) {
+	if ep.command != nil {
+		return ep.command(name, args...)
+	}
+	return exec.Command(name, args...).CombinedOutput()
 }
 
 func (s *Stack) AddDnsServer(dnsServer string, targetHost string) error {
@@ -140,7 +165,7 @@ func NewStack(vpnClient client.Client, dnsHijack, fakeIP bool, ipResources []cli
 		},
 		Control: func(network, address string, c syscall.RawConn) error { // By ChenXuzheng
 			return c.Control(func(fd uintptr) {
-				if err = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVIF, s.endpoint.ifceIndex); err != nil {
+				if sockErr := unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVIF, s.endpoint.ifceIndex); sockErr != nil {
 					log.Println("Warning: failed to bind to interface", s.endpoint.ifceName)
 				}
 			})
@@ -155,7 +180,7 @@ func NewStack(vpnClient client.Client, dnsHijack, fakeIP bool, ipResources []cli
 		},
 		Control: func(network, address string, c syscall.RawConn) error { // By ChenXuzheng
 			return c.Control(func(fd uintptr) {
-				if err = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVIF, s.endpoint.ifceIndex); err != nil {
+				if sockErr := unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVIF, s.endpoint.ifceIndex); sockErr != nil {
 					log.Println("Warning: failed to bind to interface", s.endpoint.ifceName)
 				}
 			})
@@ -187,17 +212,43 @@ func (s *Stack) updateIP(ip net.IP) error {
 	if oldIP.Equal(newIP) {
 		return nil
 	}
-	add := exec.Command("ifconfig", s.endpoint.ifceName, "inet", newIP.String(), newIP.String(), "netmask", "255.255.255.255", "alias")
-	if output, err := add.CombinedOutput(); err != nil {
+	if output, err := s.endpoint.runCommand("ifconfig", s.endpoint.ifceName, "inet", newIP.String(), newIP.String(), "netmask", "255.255.255.255", "alias"); err != nil {
 		return fmt.Errorf("add virtual IP: %w: %s", err, output)
 	}
-	del := exec.Command("ifconfig", s.endpoint.ifceName, "inet", oldIP.String(), "-alias")
-	if output, err := del.CombinedOutput(); err != nil {
-		_ = exec.Command("ifconfig", s.endpoint.ifceName, "inet", newIP.String(), "-alias").Run()
-		return fmt.Errorf("remove old virtual IP: %w: %s", err, output)
+	// A Darwin route caches its interface address. Merely swapping aliases leaves
+	// new system connections choosing the removed source (EADDRNOTAVAIL).
+	// Retarget only our routes while both addresses still exist, and roll back
+	// before removing the new alias if any command fails.
+	var changed []string
+	rollback := func(cause error) error {
+		restored := true
+		for i := len(changed) - 1; i >= 0; i-- {
+			if err := s.endpoint.setRouteAddress("change", changed[i], oldIP); err != nil {
+				restored = false
+				cause = errors.Join(cause, fmt.Errorf("rollback: %w", err))
+			}
+		}
+		if !restored {
+			// Do not remove an address still referenced by an unrecovered route.
+			return fmt.Errorf("retained virtual IP alias %s after incomplete route rollback: %w", newIP, cause)
+		}
+		if output, err := s.endpoint.runCommand("ifconfig", s.endpoint.ifceName, "inet", newIP.String(), "-alias"); err != nil {
+			cause = errors.Join(cause, fmt.Errorf("remove new virtual IP during rollback: %w: %s", err, output))
+		}
+		return cause
+	}
+	for _, target := range s.endpoint.routes {
+		if err := s.endpoint.setRouteAddress("change", target, newIP); err != nil {
+			return rollback(err)
+		}
+		changed = append(changed, target)
+	}
+	if output, err := s.endpoint.runCommand("ifconfig", s.endpoint.ifceName, "inet", oldIP.String(), "-alias"); err != nil {
+		return rollback(fmt.Errorf("remove old virtual IP: %w: %s", err, output))
 	}
 	s.endpoint.ip = append(net.IP(nil), newIP...)
 	s.endpoint.tcpDialer.LocalAddr = &net.TCPAddr{IP: append(net.IP(nil), newIP...)}
 	s.endpoint.udpDialer.LocalAddr = &net.UDPAddr{IP: append(net.IP(nil), newIP...)}
+	log.Printf("TUN virtual IP updated: %s -> %s; refreshed %d managed routes", oldIP, newIP, len(changed))
 	return nil
 }

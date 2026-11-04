@@ -364,7 +364,18 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 	} else {
 		authServerHost = fmt.Sprintf("%s:%d", options.ServerAddress, options.ServerPort)
 	}
-	sess := auth.NewSessionContext(setupCtx, authServerHost, c.tlsKeyLogWriter, c.underlayDialer.DialContext)
+	// The session survives setup: periodic refresh uses it until Client.Close.
+	// Propagate caller cancellation during setup only, detaching it on success.
+	sessionCtx, cancelSession := context.WithCancel(c.lifecycleCtx)
+	stopSessionSetupCancellation := context.AfterFunc(setupCtx, cancelSession)
+	sessionReady := false
+	defer func() {
+		stopSessionSetupCancellation()
+		if !sessionReady {
+			cancelSession()
+		}
+	}()
+	sess := auth.NewSessionContext(sessionCtx, authServerHost, c.tlsKeyLogWriter, c.underlayDialer.DialContext)
 	serverVersionInfo, manifestErr := sess.ServerVersionInfo()
 	serverVersionInfo, err := resolveServerVersionInfo(clientAuthData.ServerVersionInfo, serverVersionInfo, manifestErr)
 	if err != nil {
@@ -471,6 +482,14 @@ func (c *Client) SetupContext(ctx context.Context, options SetupOptions) ([]byte
 			return nil, fmt.Errorf("failed to save client data: %w", err)
 		}
 	}
+	stopSessionSetupCancellation()
+	if err := setupCtx.Err(); err != nil {
+		return nil, err
+	}
+	if err := sessionCtx.Err(); err != nil {
+		return nil, err
+	}
+	sessionReady = true
 	if options.SessionRefreshInterval > 0 {
 		c.startSessionRefresh(sess.Refresh, clientAuthData, options.SaveClientData, options.SessionRefreshInterval)
 	}
